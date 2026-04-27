@@ -1,0 +1,16 @@
+# Environment — never commit real keys
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Uploaded files and generated reports
+uploads/*
+reports/*
+!uploads/.gitkeep
+!reports/.gitkeep

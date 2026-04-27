@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Workflow Automation Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="container">
+
+    <header>
+      <div class="logo">⚡</div>
+      <div>
+        <h1>AI Workflow Automation Agent</h1>
+        <p>Multi-step AI automation · Dynamic tool-calling pipeline</p>
+      </div>
+      <div id="status-dot" class="status-dot" title="Checking server..."></div>
+    </header>
+
+    <main>
+
+      <!-- ── Input Card ── -->
+      <section class="card" id="input-panel">
+        <h2 class="card-label">New Workflow</h2>
+
+        <div class="field">
+          <label for="instruction">Instruction</label>
+          <textarea
+            id="instruction"
+            rows="4"
+            placeholder="e.g. Analyze the uploaded sales CSV, identify the top 5 products by revenue, and generate a formatted report."
+          ></textarea>
+        </div>
+
+        <div class="field">
+          <label>File <span class="optional">(optional — CSV or text)</span></label>
+          <div class="file-row">
+            <input type="file" id="file-input" accept=".csv,.txt,.md,.json" />
+            <label for="file-input" class="file-btn">📎 Choose File</label>
+            <span id="file-name" class="file-name">No file selected</span>
+            <button id="clear-file-btn" class="clear-file hidden" onclick="clearFile()">✕</button>
+          </div>
+        </div>
+
+        <button id="run-btn" onclick="runWorkflow()">
+          <span id="btn-text">▶ Run Workflow</span>
+          <span id="btn-spinner" class="spinner hidden"></span>
+        </button>
+
+        <p id="error-msg" class="error-msg hidden"></p>
+      </section>
+
+      <!-- ── Execution Log ── -->
+      <section class="card hidden" id="log-panel">
+        <h2 class="card-label">Execution Log</h2>
+        <div id="log-steps"></div>
+        <p id="total-time" class="total-time"></p>
+      </section>
+
+      <!-- ── Result ── -->
+      <section class="card hidden" id="result-panel">
+        <div class="result-header">
+          <h2 class="card-label">Result</h2>
+          <div class="result-actions">
+            <button class="copy-btn" onclick="copyResult()">Copy</button>
+            <button class="download-btn" onclick="downloadReport()">⬇ Download</button>
+          </div>
+        </div>
+        <div id="result-content" class="result-content"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
