@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate app imports
+        run: python -c "from app.main import app; print('App loaded successfully')"
+        env:
+          GROQ_API_KEY: dummy_ci_key
+
+      - name: Validate tool registry
+        run: |
+          python -c "
+          import os; os.environ['GROQ_API_KEY'] = 'dummy'
+          from app.tools.registry import registry
+          import app.tools.file_reader
+          import app.tools.data_analyzer
+          import app.tools.summarizer
+          import app.tools.report_generator
+          tools = list(registry._tools.keys())
+          assert len(tools) == 4, f'Expected 4 tools, got {len(tools)}'
+          print(f'Registry OK — tools: {tools}')
+          "
