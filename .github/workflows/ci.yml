@@ -33,11 +33,15 @@ jobs:
           python -c "
           import os; os.environ['GROQ_API_KEY'] = 'dummy'
           from app.tools.registry import registry
+          from app.tools.groq_utils import groq_create_with_retry
+          from app.tools import context as ctx
           import app.tools.file_reader
           import app.tools.data_analyzer
           import app.tools.summarizer
           import app.tools.report_generator
           tools = list(registry._tools.keys())
           assert len(tools) == 4, f'Expected 4 tools, got {len(tools)}'
+          ctx.set('x', 1); assert ctx.has('x'); ctx.reset(); assert not ctx.has('x')
           print(f'Registry OK — tools: {tools}')
+          print('Context helpers OK')
           "

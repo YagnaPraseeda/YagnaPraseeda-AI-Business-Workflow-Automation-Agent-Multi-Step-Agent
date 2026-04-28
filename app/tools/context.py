@@ -11,3 +11,7 @@ def set(key: str, value) -> None:
 
 def get(key: str, default=None):
     return _state.get(key, default)
+
+
+def has(key: str) -> bool:
+    return key in _state and _state[key] is not None

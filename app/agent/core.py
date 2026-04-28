@@ -4,36 +4,12 @@ import re
 import time
 from datetime import datetime
 
-from groq import BadRequestError, Groq, RateLimitError
+from groq import BadRequestError, Groq
 
 from app.models.schemas import ExecutionStep
 from app.tools import context as ctx
+from app.tools.groq_utils import groq_create_with_retry
 from app.tools.registry import registry
-
-_MAX_RETRIES = 4
-_RETRY_BASE_WAIT = 2.0  # seconds
-
-
-def _groq_create_with_retry(client: Groq, **kwargs):
-    """Call client.chat.completions.create with exponential backoff on rate limits."""
-    for attempt in range(_MAX_RETRIES):
-        try:
-            return client.chat.completions.create(**kwargs)
-        except RateLimitError as exc:
-            if attempt == _MAX_RETRIES - 1:
-                raise
-            # Parse suggested wait from error message, default to exponential backoff
-            body = getattr(exc, "body", {}) or {}
-            msg = (body.get("error", {}).get("message", "") if isinstance(body, dict) else str(exc))
-            m = re.search(r"try again in (\d+(?:\.\d+)?)(ms|s)", msg)
-            if m:
-                val, unit = float(m.group(1)), m.group(2)
-                suggested = val / 1000 if unit == "ms" else val
-            else:
-                suggested = 0
-            wait = max(suggested + 1, _RETRY_BASE_WAIT * (2 ** attempt))
-            time.sleep(wait)
-
 
 _SYSTEM_PROMPT = """\
 You are an AI workflow automation agent. You receive natural-language instructions
@@ -91,9 +67,33 @@ def _build_tools() -> list[dict]:
 
 
 def _parse_legacy_calls(text: str) -> list[dict]:
-    """Parse Llama's legacy <function=Name>{args}</function> format (handles variants like Name": too)."""
+    """
+    Parse Llama's legacy function-call formats into structured dicts.
+    Handles all known variants:
+      <function=Tool>{"args"}</function>
+      <function=Tool":{"args"}</function>
+      <function=Tool {"args"}>\n</function>
+      <function=Tool {"args"}>          (no closing tag)
+    """
     calls = []
-    for i, m in enumerate(re.finditer(r'<function=(\w+)[^{]*(\{.*?\}).*?</function>', text, re.DOTALL)):
+
+    # Pass 1: with closing tag — handles all separator variants between name and JSON
+    for i, m in enumerate(
+        re.finditer(r'<function=(\w+)[^{]*(\{.*?\}).*?</function>', text, re.DOTALL)
+    ):
+        try:
+            args = json.loads(m.group(2))
+        except json.JSONDecodeError:
+            args = {}
+        calls.append({"id": f"legacy_call_{i}", "name": m.group(1), "args": args})
+
+    if calls:
+        return calls
+
+    # Pass 2: no closing tag — match just the opening pattern + JSON object
+    for i, m in enumerate(
+        re.finditer(r'<function=(\w+)[^{]*(\{[^}]+\})', text)
+    ):
         try:
             args = json.loads(m.group(2))
         except json.JSONDecodeError:
@@ -111,7 +111,7 @@ class WorkflowAgent:
     def run(
         self, instruction: str, file_path: str | None = None
     ) -> tuple[str, list[ExecutionStep]]:
-        ctx.reset()  # fresh context for every workflow run
+        ctx.reset()
 
         execution_log: list[ExecutionStep] = []
         step_counter = 0
@@ -131,7 +131,7 @@ class WorkflowAgent:
             reasoning: str | None = None
 
             try:
-                response = _groq_create_with_retry(
+                response = groq_create_with_retry(
                     self.client,
                     model=self.model_name,
                     messages=messages,
@@ -167,16 +167,27 @@ class WorkflowAgent:
                     return message.content or "", execution_log
 
             except BadRequestError as exc:
-                # Llama sometimes outputs <function=Name>{args}</function> as plain text.
-                # Parse it and recover so the workflow continues.
+                # Llama emits <function=Name>{args}</function> as plain text instead
+                # of using the structured tool_calls API. Parse and recover.
                 body = getattr(exc, "body", {}) or {}
                 err = body.get("error", {}) if isinstance(body, dict) else {}
                 if err.get("code") != "tool_use_failed":
                     raise
+
                 failed_gen = err.get("failed_generation", "")
                 parsed = _parse_legacy_calls(failed_gen)
+
                 if not parsed:
-                    raise
+                    # Last resort: if the file hasn't been loaded yet, start there
+                    if file_path and not ctx.has("file_content"):
+                        parsed = [{
+                            "id": "fallback_call_0",
+                            "name": "FileReaderTool",
+                            "args": {"file_path": file_path},
+                        }]
+                    else:
+                        raise
+
                 fake_calls = [
                     {
                         "id": c["id"],
