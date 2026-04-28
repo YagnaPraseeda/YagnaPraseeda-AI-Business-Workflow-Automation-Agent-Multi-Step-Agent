@@ -1,9 +1,33 @@
 import os
+import re
+import time
 
-from groq import Groq
+from groq import Groq, RateLimitError
 
 from app.tools import context as ctx
 from app.tools.registry import registry
+
+_MAX_RETRIES = 4
+_RETRY_BASE_WAIT = 2.0
+
+
+def _groq_create_with_retry(client: Groq, **kwargs):
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except RateLimitError as exc:
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            body = getattr(exc, "body", {}) or {}
+            msg = (body.get("error", {}).get("message", "") if isinstance(body, dict) else str(exc))
+            m = re.search(r"try again in (\d+(?:\.\d+)?)(ms|s)", msg)
+            if m:
+                val, unit = float(m.group(1)), m.group(2)
+                suggested = val / 1000 if unit == "ms" else val
+            else:
+                suggested = 0
+            wait = max(suggested + 1, _RETRY_BASE_WAIT * (2 ** attempt))
+            time.sleep(wait)
 
 _MAX_INPUT_CHARS = 8_000
 
@@ -48,7 +72,8 @@ def summarize_text(instruction: str) -> str:
         truncated += f"\n... (truncated to {_MAX_INPUT_CHARS} chars)"
 
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
-    response = client.chat.completions.create(
+    response = _groq_create_with_retry(
+        client,
         model=os.environ.get("MODEL", "llama-3.3-70b-versatile"),
         messages=[
             {"role": "user", "content": f"{instruction}\n\nContent:\n{truncated}"}

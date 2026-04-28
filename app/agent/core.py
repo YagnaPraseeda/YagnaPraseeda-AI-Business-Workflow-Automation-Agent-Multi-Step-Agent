@@ -4,11 +4,36 @@ import re
 import time
 from datetime import datetime
 
-from groq import BadRequestError, Groq
+from groq import BadRequestError, Groq, RateLimitError
 
 from app.models.schemas import ExecutionStep
 from app.tools import context as ctx
 from app.tools.registry import registry
+
+_MAX_RETRIES = 4
+_RETRY_BASE_WAIT = 2.0  # seconds
+
+
+def _groq_create_with_retry(client: Groq, **kwargs):
+    """Call client.chat.completions.create with exponential backoff on rate limits."""
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except RateLimitError as exc:
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            # Parse suggested wait from error message, default to exponential backoff
+            body = getattr(exc, "body", {}) or {}
+            msg = (body.get("error", {}).get("message", "") if isinstance(body, dict) else str(exc))
+            m = re.search(r"try again in (\d+(?:\.\d+)?)(ms|s)", msg)
+            if m:
+                val, unit = float(m.group(1)), m.group(2)
+                suggested = val / 1000 if unit == "ms" else val
+            else:
+                suggested = 0
+            wait = max(suggested + 1, _RETRY_BASE_WAIT * (2 ** attempt))
+            time.sleep(wait)
+
 
 _SYSTEM_PROMPT = """\
 You are an AI workflow automation agent. You receive natural-language instructions
@@ -105,7 +130,8 @@ class WorkflowAgent:
             reasoning: str | None = None
 
             try:
-                response = self.client.chat.completions.create(
+                response = _groq_create_with_retry(
+                    self.client,
                     model=self.model_name,
                     messages=messages,
                     tools=tools,
