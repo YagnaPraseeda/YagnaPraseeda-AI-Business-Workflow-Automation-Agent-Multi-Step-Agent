@@ -2,45 +2,45 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.tools import context as ctx
 from app.tools.registry import registry
 
 
 @registry.register(
     name="DataAnalyzerTool",
     description=(
-        "Analyze a CSV file using pandas. Returns shape, column names, data types, "
-        "missing-value counts, descriptive statistics, and query-specific insights "
-        "(correlations, top-N rows, value counts). Always call this after FileReaderTool "
-        "when the task involves data analysis."
+        "Run statistical analysis on the previously loaded CSV file. "
+        "Only use this after FileReaderTool confirmed the file is a CSV. "
+        "Never use this on .txt, .md, .json, or .log files."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Path to the CSV file to analyze",
-            },
             "query": {
                 "type": "string",
                 "description": (
-                    "Specific analysis to perform, e.g. 'summary statistics', "
-                    "'find missing values', 'correlation matrix', "
-                    "'top 5 rows by <column>'"
+                    "What to analyze, e.g. 'summary statistics', "
+                    "'correlation matrix', 'top 5 rows', 'missing values'"
                 ),
-            },
+            }
         },
-        "required": ["file_path", "query"],
+        "required": ["query"],
     },
 )
-def analyze_data(file_path: str, query: str) -> str:
+def analyze_data(query: str) -> str:
+    file_path = ctx.get("file_path")
+    file_ext = ctx.get("file_ext")
+
+    if not file_path:
+        return "Error: No file loaded. Call FileReaderTool first."
+
+    if file_ext != ".csv":
+        return (
+            f"Error: DataAnalyzerTool only supports CSV files. "
+            f"The loaded file is a '{file_ext}' file. Use SummarizationTool instead."
+        )
+
     path = Path(file_path)
-
-    if not path.exists():
-        return f"Error: File '{file_path}' not found."
-
-    if path.suffix.lower() != ".csv":
-        return f"Error: DataAnalyzerTool only supports CSV files. Got '{path.suffix}'."
-
     try:
         df = pd.read_csv(path)
     except Exception as exc:
@@ -53,7 +53,7 @@ def analyze_data(file_path: str, query: str) -> str:
     parts.append(f"Shape: {df.shape[0]} rows × {df.shape[1]} columns")
     parts.append(f"Columns: {', '.join(df.columns.tolist())}")
     parts.append(f"\nData types:\n{df.dtypes.to_string()}")
-    parts.append(f"\nMissing values per column:\n{df.isnull().sum().to_string()}")
+    parts.append(f"\nMissing values:\n{df.isnull().sum().to_string()}")
 
     numeric = df.select_dtypes(include="number")
     if not numeric.empty:
@@ -77,4 +77,6 @@ def analyze_data(file_path: str, query: str) -> str:
         missing_pct = (df.isnull().sum() / len(df) * 100).round(2)
         parts.append(f"\nMissing percentage:\n{missing_pct.to_string()}")
 
-    return "\n".join(parts)
+    result = "\n".join(parts)
+    ctx.set("analysis_result", result)
+    return result

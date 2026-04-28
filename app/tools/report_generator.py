@@ -2,51 +2,47 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from app.tools import context as ctx
 from app.tools.registry import registry
 
 
 @registry.register(
     name="ReportGeneratorTool",
     description=(
-        "Compile analysis results into a structured Markdown report and save it to disk. "
-        "Always call this as the final step to produce the deliverable for the user."
+        "Compile all findings into a structured Markdown report and save it to disk. "
+        "Reads the summary and analysis automatically — use this as the final step."
     ),
     parameters={
         "type": "object",
         "properties": {
             "title": {
                 "type": "string",
-                "description": "Report title",
-            },
-            "sections": {
-                "type": "array",
-                "description": "Ordered list of report sections",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "heading": {"type": "string", "description": "Section heading"},
-                        "content": {"type": "string", "description": "Section body text"},
-                    },
-                    "required": ["heading", "content"],
-                },
-            },
+                "description": "Report title, e.g. 'System Design Analysis Report'",
+            }
         },
-        "required": ["title", "sections"],
+        "required": ["title"],
     },
 )
-def generate_report(title: str, sections: list[dict]) -> str:
+def generate_report(title: str) -> str:
+    summary = ctx.get("summary", "")
+    analysis = ctx.get("analysis_result", "")
+    file_name = ctx.get("file_name", "unknown file")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if not summary and not analysis:
+        return "Error: No content to report. Run SummarizationTool or DataAnalyzerTool first."
 
     lines: list[str] = [
         f"# {title}",
-        f"*Generated: {timestamp}*",
+        f"*Generated: {timestamp} | Source: {file_name}*",
         "",
     ]
 
-    for section in sections:
-        lines.append(f"## {section['heading']}")
-        lines.append(section["content"])
-        lines.append("")
+    if analysis:
+        lines += ["## Data Analysis", analysis, ""]
+
+    if summary:
+        lines += ["## Summary & Insights", summary, ""]
 
     report_md = "\n".join(lines)
 

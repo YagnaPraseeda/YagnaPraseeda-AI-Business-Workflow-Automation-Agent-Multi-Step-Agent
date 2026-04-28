@@ -1,6 +1,7 @@
 import csv
 from pathlib import Path
 
+from app.tools import context as ctx
 from app.tools.registry import registry
 
 _SUPPORTED = {".csv", ".txt", ".md", ".json", ".log"}
@@ -9,15 +10,15 @@ _SUPPORTED = {".csv", ".txt", ".md", ".json", ".log"}
 @registry.register(
     name="FileReaderTool",
     description=(
-        "Load the contents of a CSV or plain-text file and return it as a string. "
-        "Always use this as the first step whenever a file path is referenced."
+        "Load a file's contents and make them available to all subsequent tools. "
+        "Always call this first when a file is referenced. Call it exactly once per workflow."
     ),
     parameters={
         "type": "object",
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Absolute or relative path to the file to read",
+                "description": "Path to the file to read",
             }
         },
         "required": ["file_path"],
@@ -51,13 +52,29 @@ def read_file(file_path: str) -> str:
                         break
         except UnicodeDecodeError:
             return f"Error: Could not decode '{file_path}'. File may use an unsupported encoding."
-        return "\n".join(rows)
+        content = "\n".join(rows)
+    else:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return f"Error: Could not decode '{file_path}'. File may use an unsupported encoding."
+        if len(content) > 10_000:
+            content = content[:10_000] + "\n... (truncated at 10,000 chars)"
 
-    try:
-        content = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return f"Error: Could not decode '{file_path}'. File may use an unsupported encoding."
+    ctx.set("file_content", content)
+    ctx.set("file_path", str(path))
+    ctx.set("file_ext", suffix)
+    ctx.set("file_name", path.name)
 
-    if len(content) > 10_000:
-        content = content[:10_000] + "\n... (truncated at 10,000 chars)"
-    return content
+    if suffix == ".csv":
+        next_tool = "DataAnalyzerTool (CSV detected) or SummarizationTool"
+    else:
+        next_tool = "SummarizationTool — do NOT use DataAnalyzerTool (not a CSV file)"
+
+    return (
+        f"File loaded successfully.\n"
+        f"- Name: {path.name}\n"
+        f"- Type: {suffix}\n"
+        f"- Size: {len(content):,} characters\n\n"
+        f"Content is stored and ready. Next tool: {next_tool}."
+    )

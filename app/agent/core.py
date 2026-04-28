@@ -7,25 +7,45 @@ from datetime import datetime
 from groq import BadRequestError, Groq
 
 from app.models.schemas import ExecutionStep
+from app.tools import context as ctx
 from app.tools.registry import registry
 
 _SYSTEM_PROMPT = """\
 You are an AI workflow automation agent. You receive natural-language instructions
 and execute them step-by-step using the tools available to you.
 
-Available tools and when to use them:
-- FileReaderTool: Load a file's contents. Always use this first when a file is referenced.
-- DataAnalyzerTool: Run statistical analysis on CSV data (shape, types, statistics, correlations, trends). Use after FileReaderTool for any data/CSV analysis task.
-- SummarizationTool: Summarize text or extract insights using AI. Use when the task asks for a summary, key points, or insights.
-- ReportGeneratorTool: Compile all findings into a structured Markdown report. Use as the final step when the task asks for a report or document.
+HOW TOOLS SHARE DATA:
+Tools communicate through a shared context — you do NOT pass file content between tools.
+FileReaderTool loads the file and stores it. Every subsequent tool reads it automatically.
 
-Workflow decision rules — use ONLY the tools needed:
-- "Summarize this file"             → FileReaderTool → SummarizationTool
-- "Analyze this data"               → FileReaderTool → DataAnalyzerTool → SummarizationTool
-- "Analyze and generate a report"   → FileReaderTool → DataAnalyzerTool → SummarizationTool → ReportGeneratorTool
-- "Extract key risks from document" → FileReaderTool → SummarizationTool
+TOOLS:
+- FileReaderTool(file_path)
+    Load a file. Always call this FIRST. Call it EXACTLY ONCE. Its response tells you
+    the file type and which tool to call next — follow that guidance.
 
-Call tools directly using the function-calling API. Do not describe tool calls in plain text.
+- DataAnalyzerTool(query)
+    Analyze the loaded file statistically. CSV FILES ONLY.
+    NEVER call this on .txt, .md, .json, or .log files — it will fail.
+
+- SummarizationTool(instruction)
+    Summarize or extract insights from the loaded content.
+    Do NOT pass a 'text' argument — it reads the file automatically.
+
+- ReportGeneratorTool(title)
+    Save a structured Markdown report. Call this LAST when a report is requested.
+    Do NOT pass 'sections' — it compiles from context automatically.
+
+WORKFLOW RULES — use ONLY the tools needed, each tool ONCE:
+- Text/doc file (.txt .md .json .log):
+    FileReaderTool → SummarizationTool [→ ReportGeneratorTool if report requested]
+- CSV/data file (.csv):
+    FileReaderTool → DataAnalyzerTool → SummarizationTool [→ ReportGeneratorTool if report requested]
+
+STRICT RULES:
+- Never call FileReaderTool more than once
+- Never call DataAnalyzerTool on a non-CSV file
+- Never pass raw file content as a tool argument — tools read from context
+- Stop as soon as the task is complete; do not loop
 """
 
 _MAX_ITERATIONS = 20
@@ -65,6 +85,8 @@ class WorkflowAgent:
     def run(
         self, instruction: str, file_path: str | None = None
     ) -> tuple[str, list[ExecutionStep]]:
+        ctx.reset()  # fresh context for every workflow run
+
         execution_log: list[ExecutionStep] = []
         step_counter = 0
 
@@ -118,8 +140,8 @@ class WorkflowAgent:
                     return message.content or "", execution_log
 
             except BadRequestError as exc:
-                # Llama sometimes outputs <function=Name>{args}</function> as plain text
-                # instead of using the structured tool_calls API. Parse and recover.
+                # Llama sometimes outputs <function=Name>{args}</function> as plain text.
+                # Parse it and recover so the workflow continues.
                 body = getattr(exc, "body", {}) or {}
                 err = body.get("error", {}) if isinstance(body, dict) else {}
                 if err.get("code") != "tool_use_failed":
