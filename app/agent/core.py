@@ -93,7 +93,7 @@ def _build_tools() -> list[dict]:
 def _parse_legacy_calls(text: str) -> list[dict]:
     """Parse Llama's legacy <function=Name>{args}</function> format (handles variants like Name": too)."""
     calls = []
-    for i, m in enumerate(re.finditer(r'<function=(\w+)[^{]*(\{.*?\})\s*</function>', text, re.DOTALL)):
+    for i, m in enumerate(re.finditer(r'<function=(\w+)[^{]*(\{.*?\}).*?</function>', text, re.DOTALL)):
         try:
             args = json.loads(m.group(2))
         except json.JSONDecodeError:
