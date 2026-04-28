@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from groq import RateLimitError
 
 from app.agent.core import WorkflowAgent
 from app.models.schemas import UploadResponse, WorkflowRequest, WorkflowResponse
@@ -33,6 +34,8 @@ async def run_workflow(request: WorkflowRequest) -> WorkflowResponse:
             instruction=request.instruction,
             file_path=request.file_path,
         )
+    except RateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
